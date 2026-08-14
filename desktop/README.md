@@ -53,7 +53,7 @@ npm run dist:mac:arm64   # 或 dist:mac:x64 / dist:win
 
 产物在 `desktop/dist/`。
 
-⚠️ **一台机器只能打它自己那个架构的包。** `koffi` 的安装脚本只会下载宿主平台的原生二进制，所以 Apple 芯片上装配出来的 `runtime/` 不能拿去发给 Intel Mac。跨架构必须换机器——CI 的矩阵就是这么分的。
+⚠️ **一台机器只能打它自己那个架构的包。** `koffi` 的原生绑定是平台专属的 optional dependency（`@koromix/koffi-darwin-x64` 之类），`node-pty` 是按平台+架构挑预编译产物，npm 都只会装宿主那一份。所以 Apple 芯片上装配出来的 `runtime/` 不能拿去发给 Intel Mac。跨架构必须换机器——CI 的矩阵就是这么分的。
 
 ## CI
 

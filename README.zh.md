@@ -2,6 +2,10 @@
 
 [English](README.md) | 中文
 
+> **📦 桌面客户端 — 无需终端。** 在 [**Releases**](https://github.com/usherwong/deepseek-harness/releases/latest) 页面下载 **DSH Desktop**，支持 **macOS（Apple 芯片 · Intel）** 与 **Windows**，免装 Node.js、不用命令行，下载双击即用。本 fork 维护的非官方 Electron 构建，说明见 [desktop/README.md](desktop/README.md)。
+>
+> **📦 Desktop app — no terminal required.** Download **DSH Desktop** for **macOS (Apple silicon · Intel)** and **Windows** from the [**Releases**](https://github.com/usherwong/deepseek-harness/releases/latest) page. Unofficial build maintained in this fork — see [desktop/README.md](desktop/README.md).
+
 DeepSeek Harness（`dsh`）是由 [DeepSeek AI](https://deepseek.com) 开发的开源 agent harness（智能体框架）。
 
 它采用**一切皆插件**的架构，并由 [Cordis](https://github.com/cordiverse/cordis) 驱动，其设计参见论文 [_A Programming Paradigm for Spatiotemporal Composability_](https://github.com/cordiverse/paper)。

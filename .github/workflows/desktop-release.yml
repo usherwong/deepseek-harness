@@ -4,8 +4,9 @@ name: Desktop release
 # Windows, then publishes the installers as a GitHub Release.
 #
 # One runner per architecture is required, not a convenience: prepare-runtime
-# stages the harness with its native dependencies, and koffi's install script
-# fetches only the host platform's binary. A payload built on Apple silicon
+# stages the harness with its native dependencies, and npm resolves those per
+# host — koffi's binding is a platform-specific optional dependency, node-pty
+# picks a prebuild by platform and arch. A payload staged on Apple silicon
 # cannot ship to an Intel Mac.
 
 on:

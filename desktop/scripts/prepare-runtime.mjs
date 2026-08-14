@@ -9,10 +9,11 @@
  * harness edits. Either way the result is one directory tree that
  * electron-builder copies verbatim into the app as `extraResources`.
  *
- * Native dependencies decide the build topology: `koffi` fetches only the host
- * platform's binary during its install script, so a payload must be staged on
- * the machine architecture it will ship to. Cross-staging is possible for the
- * Node binary alone (`--platform`/`--arch`), not for the harness closure.
+ * Native dependencies decide the build topology: `koffi` ships its binding as a
+ * platform-specific optional dependency and `node-pty` as per-platform
+ * prebuilds, both resolved for the installing host. A payload must therefore be
+ * staged on the machine architecture it will ship to. Cross-staging is possible
+ * for the Node binary alone (`--platform`/`--arch`), not for the harness closure.
  *
  * Usage:
  *   node scripts/prepare-runtime.mjs [options]
