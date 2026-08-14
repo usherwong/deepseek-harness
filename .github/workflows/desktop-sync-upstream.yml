@@ -1,0 +1,135 @@
+name: Sync upstream harness
+
+# Keeps this fork current with deepseek-ai/deepseek-harness and rebuilds the
+# desktop installers whenever the harness this shell wraps has moved.
+#
+# Two things can move independently, and both are checked:
+#   - the upstream git history, which matters for source-mode builds and keeps
+#     the fork from drifting;
+#   - the published @deepseek-ai/dsh version, which is what npm-mode builds bundle.
+
+on:
+  schedule:
+    # Daily, off the hour so the run is not queued behind the cron rush.
+    - cron: '17 18 * * *'
+  workflow_dispatch:
+    inputs:
+      force-build:
+        description: Build and publish even when nothing upstream changed.
+        type: boolean
+        default: false
+
+concurrency:
+  group: desktop-sync-upstream
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    name: Sync fork
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      changed: ${{ steps.decide.outputs.changed }}
+      mode: ${{ steps.decide.outputs.mode }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Configure committer
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+      - name: Merge upstream history
+        id: upstream
+        run: |
+          set -euo pipefail
+          git remote add upstream https://github.com/deepseek-ai/deepseek-harness.git
+          git fetch --no-tags upstream master
+
+          before="$(git rev-parse HEAD)"
+          if git merge-base --is-ancestor upstream/master HEAD; then
+            echo 'fork already contains every upstream commit'
+            echo "merged=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "new upstream commits:"
+          git log --oneline HEAD..upstream/master | head -30
+
+          # The shell only adds files (desktop/ and two workflows), so a conflict
+          # means upstream touched something this fork also changed. That needs a
+          # human, not an automatic resolution.
+          if ! git merge --no-edit -m 'chore(desktop): merge upstream deepseek-ai/deepseek-harness' upstream/master; then
+            git merge --abort || true
+            {
+              echo '## Upstream merge conflict'
+              echo
+              echo 'Merging `upstream/master` into this fork conflicted. Resolve it locally:'
+              echo
+              echo '```sh'
+              echo 'git remote add upstream https://github.com/deepseek-ai/deepseek-harness.git'
+              echo 'git fetch upstream master'
+              echo 'git merge upstream/master'
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          git push origin HEAD:${GITHUB_REF_NAME}
+          test "$(git rev-parse HEAD)" != "$before" && echo "merged=true" >> "$GITHUB_OUTPUT" || echo "merged=false" >> "$GITHUB_OUTPUT"
+
+      - name: Track published harness version
+        id: npm
+        run: |
+          set -euo pipefail
+          package="$(jq -r '.npm.package' desktop/harness.json)"
+          pinned="$(jq -r '.npm.version' desktop/harness.json)"
+          latest="$(npm view "$package" dist-tags.latest)"
+          echo "pinned=$pinned latest=$latest"
+          if [ "$pinned" = "$latest" ]; then
+            echo "bumped=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          jq --arg v "$latest" '.npm.version = $v' desktop/harness.json > desktop/harness.json.tmp
+          mv desktop/harness.json.tmp desktop/harness.json
+          git add desktop/harness.json
+          git commit -m "chore(desktop): bundle $package@$latest"
+          git push origin HEAD:${GITHUB_REF_NAME}
+          echo "bumped=true" >> "$GITHUB_OUTPUT"
+
+      - name: Decide whether to build
+        id: decide
+        run: |
+          set -euo pipefail
+          mode="$(jq -r '.mode' desktop/harness.json)"
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          if [ "${{ inputs.force-build }}" = 'true' ]; then
+            echo 'forced by dispatch input'
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          elif [ "$mode" = 'source' ] && [ "${{ steps.upstream.outputs.merged }}" = 'true' ]; then
+            echo 'source mode: upstream commits merged'
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          elif [ "${{ steps.npm.outputs.bumped }}" = 'true' ]; then
+            echo 'npm mode: a newer harness release is published'
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo 'nothing to rebuild'
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: Rebuild desktop installers
+    needs: sync
+    if: needs.sync.outputs.changed == 'true'
+    uses: ./.github/workflows/desktop-release.yml
+    permissions:
+      contents: write
+    secrets: inherit
+    with:
+      mode: ${{ needs.sync.outputs.mode }}
+      publish: true

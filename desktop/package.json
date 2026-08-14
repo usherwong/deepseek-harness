@@ -1,0 +1,30 @@
+{
+  "name": "dsh-desktop",
+  "productName": "DSH Desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Electron desktop shell for DeepSeek Harness (dsh web)",
+  "license": "MIT",
+  "author": {
+    "name": "usherwong"
+  },
+  "homepage": "https://github.com/usherwong/deepseek-harness",
+  "main": "src/main/index.js",
+  "comment:workspaces": "Declares this directory as its own npm workspace root. Without it electron-builder walks up to the harness monorepo, re-detects pnpm from its packageManager field, and drives the wrong package manager over an npm-installed tree.",
+  "workspaces": [],
+  "scripts": {
+    "runtime": "node scripts/prepare-runtime.mjs",
+    "runtime:npm": "node scripts/prepare-runtime.mjs --mode npm",
+    "runtime:source": "node scripts/prepare-runtime.mjs --mode source",
+    "icon": "node scripts/make-icon.mjs",
+    "start": "electron .",
+    "pack": "npm run icon && electron-builder --dir",
+    "dist:mac:arm64": "npm run icon && electron-builder --mac --arm64",
+    "dist:mac:x64": "npm run icon && electron-builder --mac --x64",
+    "dist:win": "npm run icon && electron-builder --win --x64"
+  },
+  "devDependencies": {
+    "electron": "43.4.0",
+    "electron-builder": "26.15.3"
+  }
+}

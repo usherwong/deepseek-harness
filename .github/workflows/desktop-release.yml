@@ -1,0 +1,228 @@
+name: Desktop release
+
+# Builds the Electron shell in desktop/ for macOS (Apple silicon and Intel) and
+# Windows, then publishes the installers as a GitHub Release.
+#
+# One runner per architecture is required, not a convenience: prepare-runtime
+# stages the harness with its native dependencies, and koffi's install script
+# fetches only the host platform's binary. A payload built on Apple silicon
+# cannot ship to an Intel Mac.
+
+on:
+  # A push that touches the shell rebuilds every platform. Documentation-only
+  # pushes are excluded: three runners for a README edit is pure waste.
+  push:
+    branches: [master]
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/desktop-release.yml'
+      - '!desktop/README.md'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Harness payload source. Empty follows desktop/harness.json.
+        type: choice
+        options: ['', npm, source]
+        default: ''
+      harness-version:
+        description: 'npm mode only: the @deepseek-ai/dsh version to bundle. Empty uses harness.json.'
+        type: string
+        default: ''
+      publish:
+        description: Publish a GitHub Release instead of keeping build artifacts only.
+        type: boolean
+        default: true
+  workflow_call:
+    inputs:
+      mode:
+        type: string
+        default: ''
+      harness-version:
+        type: string
+        default: ''
+      publish:
+        type: boolean
+        default: true
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  DSH_TELEMETRY_DISABLED: '1'
+
+jobs:
+  # A push carries no `inputs`, so the effective settings are resolved once here
+  # rather than repeated as fallback expressions across every downstream job.
+  plan:
+    name: Plan build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      mode: ${{ steps.resolve.outputs.mode }}
+      publish: ${{ steps.resolve.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve settings
+        id: resolve
+        run: |
+          set -euo pipefail
+          mode='${{ inputs.mode }}'
+          if [ -z "$mode" ]; then mode="$(jq -r '.mode' desktop/harness.json)"; fi
+          if [ "$mode" != 'npm' ] && [ "$mode" != 'source' ]; then
+            echo "::error::unknown harness mode \"$mode\""
+            exit 1
+          fi
+          # A push has no publish input; publishing is the point of a push build.
+          publish='${{ inputs.publish }}'
+          if [ -z "$publish" ]; then publish=true; fi
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "mode=$mode publish=$publish"
+
+  build:
+    name: ${{ matrix.label }}
+    needs: plan
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macOS arm64
+            os: macos-15
+            builder: --mac --arm64
+            artifact: mac-arm64
+          - label: macOS x64
+            os: macos-15-intel
+            builder: --mac --x64
+            artifact: mac-x64
+          - label: Windows x64
+            os: windows-latest
+            builder: --win --x64
+            artifact: win-x64
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      # Source mode builds the whole harness workspace; npm mode never touches it.
+      - name: Enable pnpm
+        if: needs.plan.outputs.mode == 'source'
+        run: corepack enable && corepack prepare --activate
+        working-directory: .
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+
+      - name: Install shell dependencies
+        run: npm ci
+
+      - name: Generate icon
+        run: npm run icon
+
+      - name: Stage harness runtime
+        run: >-
+          node scripts/prepare-runtime.mjs
+          --mode ${{ needs.plan.outputs.mode }}
+          ${{ inputs.harness-version != '' && format('--version {0}', inputs.harness-version) || '' }}
+
+      - name: Read build identity
+        id: identity
+        shell: bash
+        run: |
+          node -e '
+            const fs = require("node:fs")
+            const manifest = JSON.parse(fs.readFileSync("runtime/manifest.json", "utf8"))
+            const shell = JSON.parse(fs.readFileSync("package.json", "utf8"))
+            const out = process.env.GITHUB_OUTPUT
+            fs.appendFileSync(out, `harness-version=${manifest.harnessVersion}\n`)
+            fs.appendFileSync(out, `shell-version=${shell.version}\n`)
+          '
+
+      # Unsigned builds are the default. Set CSC_LINK/CSC_KEY_PASSWORD (macOS) or
+      # WIN_CSC_LINK/WIN_CSC_KEY_PASSWORD (Windows) as repository secrets to sign;
+      # build/after-pack.js ad-hoc signs macOS builds when no certificate is set,
+      # which is what lets an unsigned build launch on Apple silicon at all.
+      - name: Build installers
+        run: npx electron-builder ${{ matrix.builder }} --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.CSC_LINK != '' && 'true' || 'false' }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+
+      - name: Collect installers
+        shell: bash
+        run: |
+          mkdir -p out
+          find dist -maxdepth 1 -type f \( -name '*.dmg' -o -name '*.zip' -o -name '*.exe' \) -exec cp {} out/ \;
+          ls -la out
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dsh-desktop-${{ matrix.artifact }}
+          path: desktop/out/*
+          if-no-files-found: error
+          retention-days: 14
+
+    outputs:
+      harness-version: ${{ steps.identity.outputs.harness-version }}
+      shell-version: ${{ steps.identity.outputs.shell-version }}
+
+  release:
+    name: Publish release
+    needs: [plan, build]
+    # A bare `if` replaces the implicit success() gate, so the build result has
+    # to be named explicitly or a half-failed matrix would still publish.
+    if: ${{ needs.plan.outputs.publish == 'true' && needs.build.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Describe release
+        id: describe
+        run: |
+          echo "tag=desktop-v${{ needs.build.outputs.shell-version }}-dsh-${{ needs.build.outputs.harness-version }}" >> "$GITHUB_OUTPUT"
+          ls -la artifacts
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.describe.outputs.tag }}
+          name: DSH Desktop ${{ needs.build.outputs.shell-version }} (harness ${{ needs.build.outputs.harness-version }})
+          files: artifacts/*
+          draft: false
+          prerelease: true
+          body: |
+            Electron desktop build of DeepSeek Harness `${{ needs.build.outputs.harness-version }}`.
+
+            | Download | Platform |
+            |---|---|
+            | `*-mac-arm64.dmg` | macOS, Apple silicon |
+            | `*-mac-x64.dmg` | macOS, Intel |
+            | `*-win-x64-setup.exe` | Windows installer |
+            | `*-win-x64-portable.exe` | Windows, no install |
+
+            These builds are **not** notarized or signed with a paid certificate.
+
+            - macOS shows "app is damaged" on first launch. Clear the download flag once:
+              `xattr -dr com.apple.quarantine "/Applications/DSH Desktop.app"`
+            - Windows SmartScreen shows a publisher warning: **More info → Run anyway**.
+
+            The app stores harness state in `~/.dsh`, the same directory the `dsh`
+            CLI uses. Pick the folder agents work in from **File → Change Workspace Folder**.

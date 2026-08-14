@@ -1,0 +1,23 @@
+{
+  "$comment": [
+    "Which DeepSeek Harness build the desktop shell wraps.",
+    "'mode' selects how scripts/prepare-runtime.mjs assembles desktop/runtime/dsh:",
+    "  npm    - npm install the published @deepseek-ai/dsh at 'npm.version' (fast, no toolchain)",
+    "  source - pnpm build + pnpm deploy this repository checkout (picks up local harness edits)",
+    "'source.repoRoot' is relative to desktop/. '..' is this fork's checkout.",
+    "'node.range' picks the Node.js major bundled next to the harness; the exact",
+    "patch release is resolved at build time and recorded in runtime/manifest.json."
+  ],
+  "mode": "npm",
+  "npm": {
+    "package": "@deepseek-ai/dsh",
+    "version": "0.1.0-rc.6"
+  },
+  "source": {
+    "repoRoot": "..",
+    "filter": "@deepseek-ai/dsh"
+  },
+  "node": {
+    "range": "22"
+  }
+}

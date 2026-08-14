@@ -1,0 +1,78 @@
+appId: io.github.usherwong.dsh-desktop
+productName: DSH Desktop
+copyright: MIT-licensed shell around DeepSeek Harness
+
+directories:
+  output: dist
+  buildResources: build
+
+# The shell itself is small and ships inside the asar; the harness payload must
+# stay outside it because node-pty and koffi load real files from disk and
+# node-pty executes spawn-helper as a program.
+files:
+  - package.json
+  - src/**/*
+  - resources/**/*
+extraResources:
+  - from: runtime
+    to: runtime
+
+asar: true
+npmRebuild: false
+afterPack: build/after-pack.js
+
+# One architecture per build: prepare-runtime stages native dependencies for the
+# machine it runs on, so a payload cannot be reused across architectures.
+mac:
+  category: public.app-category.developer-tools
+  icon: build/icon.png
+  # electron-builder omits the arch from x64 filenames by default, which makes
+  # the two macOS builds indistinguishable on a release page.
+  artifactName: ${productName}-${version}-mac-${arch}.${ext}
+  darkModeSupport: true
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  extendInfo:
+    NSDesktopFolderUsageDescription: DSH Desktop needs access to run agent tasks in folders you choose.
+    NSDocumentsFolderUsageDescription: DSH Desktop needs access to run agent tasks in folders you choose.
+    NSDownloadsFolderUsageDescription: DSH Desktop needs access to run agent tasks in folders you choose.
+  target:
+    - target: dmg
+    - target: zip
+
+dmg:
+  contents:
+    - x: 140
+      y: 200
+      type: file
+    - x: 400
+      y: 200
+      type: link
+      path: /Applications
+
+win:
+  icon: build/icon.png
+  target:
+    - target: nsis
+    - target: portable
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  allowElevation: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: DSH Desktop
+  artifactName: ${productName}-${version}-win-${arch}-setup.${ext}
+
+portable:
+  artifactName: ${productName}-${version}-win-${arch}-portable.${ext}
+
+linux:
+  icon: build/icon.png
+  category: Development
+  target:
+    - target: AppImage
