@@ -17,9 +17,14 @@
 const { execFileSync } = require('node:child_process')
 const path = require('node:path')
 
+/** Whether a real certificate is configured, treating an empty value as none. */
+function isSigningConfigured() {
+  return ['CSC_LINK', 'CSC_NAME'].some(name => (process.env[name] ?? '').trim().length > 0)
+}
+
 exports.default = async function afterPack(context) {
   if (context.electronPlatformName !== 'darwin') return
-  if (process.env.CSC_LINK !== undefined || process.env.CSC_NAME !== undefined) return
+  if (isSigningConfigured()) return
 
   const appPath = path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`)
   try {

@@ -154,14 +154,44 @@ jobs:
       # WIN_CSC_LINK/WIN_CSC_KEY_PASSWORD (Windows) as repository secrets to sign;
       # build/after-pack.js ad-hoc signs macOS builds when no certificate is set,
       # which is what lets an unsigned build launch on Apple silicon at all.
+      #
+      # electron-builder distinguishes an unset CSC_LINK from one set to the
+      # empty string: the empty value sends it down the certificate-import path,
+      # where it resolves "" as a file and fails with "<projectDir> not a file".
+      # An undefined repository secret expands to an empty string, so the
+      # variables are exported here only when a certificate really is configured.
+      - name: Configure code signing
+        shell: bash
+        env:
+          MAC_CERT: ${{ secrets.CSC_LINK }}
+          MAC_CERT_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          WINDOWS_CERT: ${{ secrets.WIN_CSC_LINK }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          # Heredoc form, because a base64 certificate is not single-line.
+          export_when_set() {
+            [ -n "${2:-}" ] || return 0
+            {
+              echo "$1<<__DSH_SIGNING_EOF__"
+              echo "$2"
+              echo '__DSH_SIGNING_EOF__'
+            } >> "$GITHUB_ENV"
+          }
+          export_when_set CSC_LINK "${MAC_CERT:-}"
+          export_when_set CSC_KEY_PASSWORD "${MAC_CERT_PASSWORD:-}"
+          export_when_set WIN_CSC_LINK "${WINDOWS_CERT:-}"
+          export_when_set WIN_CSC_KEY_PASSWORD "${WINDOWS_CERT_PASSWORD:-}"
+          if [ -n "${MAC_CERT:-}" ] || [ -n "${WINDOWS_CERT:-}" ]; then
+            echo 'CSC_IDENTITY_AUTO_DISCOVERY=true' >> "$GITHUB_ENV"
+            echo 'signing with the configured certificate'
+          else
+            echo 'CSC_IDENTITY_AUTO_DISCOVERY=false' >> "$GITHUB_ENV"
+            echo 'no certificate configured: building unsigned, macOS gets an ad-hoc signature'
+          fi
+
       - name: Build installers
         run: npx electron-builder ${{ matrix.builder }} --publish never
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.CSC_LINK != '' && 'true' || 'false' }}
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
 
       - name: Collect installers
         shell: bash
