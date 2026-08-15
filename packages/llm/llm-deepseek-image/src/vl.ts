@@ -104,8 +104,20 @@ export function resolveVlConfig(input: VlConfigInput, apiKey: string): VlConfig 
   }
 }
 
+/** Exponential backoff between retries (400ms, 800ms, 1600ms). */
+function backoffDelay(attempt: number): number {
+  return 400 * 2 ** (attempt - 1)
+}
+
+/** Minimal sleep helper for retry backoff. */
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
 /**
- * Describe one image's encoded bytes through the VL endpoint.
+ * Describe one image's encoded bytes through the VL endpoint, retrying
+ * transient failures (network errors, HTTP 429, 5xx) up to three attempts so a
+ * momentary endpoint hiccup does not fail the whole turn.
  * @returns the model's textual description.
  */
 export async function describeImage(
@@ -126,24 +138,48 @@ export async function describeImage(
     }],
     max_tokens: 2048,
   }
+  const maxAttempts = 3
 
-  let response: Response
-  try {
-    response = await fetch(`${vl.baseURL}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'authorization': `Bearer ${vl.apiKey}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify(body),
-      ...signal === undefined ? {} : { signal },
-    })
-  } catch (error: unknown) {
-    if (signal?.aborted) throw error
-    throw new LlmError(`llm-deepseek-image: VL request to ${vl.baseURL} failed`, 'TRANSPORT', { cause: error })
-  }
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (signal?.aborted) throw signal.reason
 
-  if (!response.ok) {
+    let response: Response
+    try {
+      response = await fetch(`${vl.baseURL}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'authorization': `Bearer ${vl.apiKey}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(body),
+        ...signal === undefined ? {} : { signal },
+      })
+    } catch (error: unknown) {
+      if (signal?.aborted) throw error
+      if (attempt < maxAttempts) {
+        await sleep(backoffDelay(attempt))
+        continue
+      }
+      throw new LlmError(`llm-deepseek-image: VL request to ${vl.baseURL} failed`, 'TRANSPORT', { cause: error })
+    }
+
+    if (response.ok) {
+      const parsed = await response.json() as { choices?: Array<{ message?: { content?: unknown } }> }
+      const content = parsed.choices?.[0]?.message?.content
+      if (typeof content === 'string' && content.length > 0) return content
+      if (attempt < maxAttempts) {
+        await sleep(backoffDelay(attempt))
+        continue
+      }
+      throw new LlmError('llm-deepseek-image: VL API returned no description', 'EMPTY_RESPONSE')
+    }
+
+    const retryable = response.status === 429 || response.status >= 500
+    if (retryable && attempt < maxAttempts) {
+      await sleep(backoffDelay(attempt))
+      continue
+    }
+
     let message = `llm-deepseek-image: VL API error (HTTP ${response.status})`
     try {
       const parsed = await response.json() as { error?: { message?: string } }
@@ -159,10 +195,6 @@ export async function describeImage(
     )
   }
 
-  const parsed = await response.json() as { choices?: Array<{ message?: { content?: unknown } }> }
-  const content = parsed.choices?.[0]?.message?.content
-  if (typeof content !== 'string' || content.length === 0) {
-    throw new LlmError('llm-deepseek-image: VL API returned no description', 'EMPTY_RESPONSE')
-  }
-  return content
+  /* v8 ignore next -- every path above either returns or throws. */
+  throw new LlmError(`llm-deepseek-image: VL request to ${vl.baseURL} failed`, 'TRANSPORT')
 }
