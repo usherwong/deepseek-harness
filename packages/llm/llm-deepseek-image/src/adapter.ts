@@ -40,6 +40,10 @@ export interface ImageBridgeAdapterOptions {
  * delegates, leaving every other request path byte-for-byte identical.
  */
 export class ImageBridgeAdapter extends LlmAdapter {
+  /** Text descriptions keyed by content-addressed attachment id, so each pasted
+   *  image is described exactly once and later turns reuse the cached text. */
+  private readonly imageCache = new Map<string, string>()
+
   constructor(private readonly config: ImageBridgeAdapterOptions) {
     super()
   }
@@ -102,8 +106,13 @@ export class ImageBridgeAdapter extends LlmAdapter {
     const out: ContentBlock[] = []
     for (const block of blocks) {
       if (block.type === 'image') {
-        const stored = await attachments.readImage(block.attachment, signal)
-        const description = await describeImage(stored.data, stored.ref.mediaType, vl, signal)
+        const key = String(block.attachment.attachmentId)
+        let description = this.imageCache.get(key)
+        if (description === undefined) {
+          const stored = await attachments.readImage(block.attachment, signal)
+          description = await describeImage(stored.data, stored.ref.mediaType, vl, signal)
+          this.imageCache.set(key, description)
+        }
         out.push({ type: 'text', text: `[Image content]\n${description}` })
       } else if (block.type === 'tool-result') {
         out.push({
