@@ -8,7 +8,7 @@
     "'node.range' picks the Node.js major bundled next to the harness; the exact",
     "patch release is resolved at build time and recorded in runtime/manifest.json."
   ],
-  "mode": "npm",
+  "mode": "source",
   "npm": {
     "package": "@deepseek-ai/dsh",
     "version": "0.1.0-rc.6"

@@ -124,17 +124,25 @@ export function pathOps(
 /** The editor layout the owning namespace selects. */
 function layoutOf(ns: string): EditorLayout {
   if (ns === 'llm-deepseek') return 'deepseek'
+  // The image bridge reuses the DeepSeek family fields and adds a second key.
+  if (ns === 'llm-deepseek-image') return 'deepseek'
   if (ns === 'llm-pi-ai') return 'pi-ai'
   return 'unknown'
 }
 
-/** The credential reference this profile resolves keys through. */
-function refFor(namespace: SettingsNamespaceView, path: readonly string[], provider: string): string {
+/** The credential reference one profile field names. */
+function refFor(
+  namespace: SettingsNamespaceView,
+  path: readonly string[],
+  provider: string,
+  field: 'apiKeyEnv' | 'vlApiKeyEnv' = 'apiKeyEnv',
+): string {
   const profile = getPath(namespace.value, path)
   const named = typeof profile === 'object' && profile !== null
-    ? (profile as { apiKeyEnv?: unknown }).apiKeyEnv
+    ? (profile as Record<string, unknown>)[field]
     : undefined
-  return typeof named === 'string' && named.length > 0 ? named : deriveKeyRef(provider)
+  if (typeof named === 'string' && named.length > 0) return named
+  return field === 'vlApiKeyEnv' ? 'DASHSCOPE_API_KEY' : deriveKeyRef(provider)
 }
 
 /**
@@ -147,6 +155,8 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
   const [draft, setDraft] = useState<Record<string, unknown>>(() => draftAt(namespace, settingsPath))
   const [keyDraft, setKeyDraft] = useState('')
   const [keyState, setKeyState] = useState<CredentialView | undefined>(undefined)
+  const [vlKeyDraft, setVlKeyDraft] = useState('')
+  const [vlKeyState, setVlKeyState] = useState<CredentialView | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState<string | undefined>(undefined)
   // A settings success advances both retry baselines immediately. Keeping the
@@ -162,6 +172,8 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
   const disabled = props.readOnly || busy
   const layout = layoutOf(namespace.ns)
   const keyRef = refFor(namespace, settingsPath, props.provider)
+  const isImageBridge = namespace.ns === 'llm-deepseek-image'
+  const vlKeyRef = isImageBridge ? refFor(namespace, settingsPath, props.provider, 'vlApiKeyEnv') : undefined
   // The same schema read the create card makes, so the choices offered here
   // and there cannot drift apart: both come from the adapter's own `Config`.
   // Only the pi-ai layout has a per-route protocol for the read to find, and
@@ -187,6 +199,20 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
     )
     return () => { stale = true }
   }, [api.credentials, keyRef])
+
+  useEffect(() => {
+    if (vlKeyRef === undefined) return
+    let stale = false
+    setVlKeyState(undefined)
+    void api.credentials.describe({ refs: [vlKeyRef] }).then(
+      (response) => {
+        if (stale || !response.result.ok) return
+        setVlKeyState(response.result.value.credentials[vlKeyRef])
+      },
+      () => undefined,
+    )
+    return () => { stale = true }
+  }, [api.credentials, vlKeyRef])
 
   const stringAt = (source: unknown, key: string): string | undefined => {
     const value = getPath(source, [key])
@@ -282,7 +308,13 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
       const stored = await api.credentials.set({ ref: keyRef, value: keyValue })
       if (!stored.result.ok) return stored.result.error.message
     }
+    const vlKeyValue = vlKeyDraft.trim()
+    if (vlKeyRef !== undefined && vlKeyValue.length > 0) {
+      const stored = await api.credentials.set({ ref: vlKeyRef, value: vlKeyValue })
+      if (!stored.result.ok) return stored.result.error.message
+    }
     setKeyDraft('')
+    setVlKeyDraft('')
     return undefined
   }
 
@@ -313,6 +345,7 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
   }
 
   const keyLocked = keyState?.writable === false
+  const vlKeyLocked = vlKeyState?.writable === false
 
   /**
    * The catalog beneath the user layer: what the composition entry pinned, or
@@ -376,6 +409,27 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
           />
           {shownKeyFailure === undefined ? null : <p className={styles['error']}>{t(shownKeyFailure)}</p>}
         </div>
+        {isImageBridge && vlKeyRef !== undefined
+          ? (
+            <div className={styles['field']}>
+              <span className={styles['fieldLabel']}>{t('vlKeyInput')}</span>
+              <input
+                className={styles['input']}
+                type="password"
+                autoComplete="off"
+                value={vlKeyDraft}
+                placeholder={vlKeyLocked
+                  ? t('keyEnvLocked')
+                  : vlKeyState?.configured === true && props.credentialRequired !== true
+                    ? t('keyStored')
+                    : t('keyPlaceholder')}
+                aria-label={t('vlKeyInput')}
+                disabled={disabled || vlKeyLocked}
+                onChange={(event) => { setVlKeyDraft(event.target.value) }}
+              />
+            </div>
+          )
+          : null}
         {props.credentialOnly === true ? null : <details className={styles['customized']}>
           <summary className={styles['customizedSummary']}>{t('customized')}</summary>
           <div className={styles['customizedBody']}>

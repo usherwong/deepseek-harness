@@ -1,6 +1,7 @@
 node_modules/
 runtime/
 dist/
+dist-bridge/
 out/
 *.log
 .DS_Store

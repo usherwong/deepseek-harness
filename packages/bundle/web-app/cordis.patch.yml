@@ -422,3 +422,34 @@
       name: '@deepseek-ai/dsh-agent-presets'
       config:
         default: standard
+
+# Bundled media-understanding MCP servers (qwen-mm-plugins). These expose the
+# VL tools (vision_chat / ocr / grounding) and the Omni A/V + ASR tools to the
+# agent. Pasted-image recognition itself is handled by the llm-deepseek-image
+# bridge (no Python needed); these add the full media tool suite. They launch
+# through `uvx` (Python) on PATH at runtime — a missing uvx logs a startup
+# warning and the tools simply stay unavailable, nothing else is affected.
+- insert:
+    - id: mcp-qwen-mm-plugins-core
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: qwen-mm-plugins-core
+        transport: stdio
+        command: uvx
+        args:
+          - '--from'
+          - 'qwen-mm-plugins[core] @ git+https://github.com/QwenLM/Qwen-MM-Plugins.git@qwen-mm-plugins-core-v1.0.2'
+          - 'qwen-mm-plugins-core'
+        cwd: !!js process.cwd()
+
+    - id: mcp-qwen-mm-plugins-api
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: qwen-mm-plugins-api
+        transport: stdio
+        command: uvx
+        args:
+          - '--from'
+          - 'qwen-mm-plugins[api] @ git+https://github.com/QwenLM/Qwen-MM-Plugins.git@qwen-mm-plugins-api-v1.0.3'
+          - 'qwen-mm-plugins-api'
+        cwd: !!js process.cwd()

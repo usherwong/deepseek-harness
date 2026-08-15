@@ -177,6 +177,7 @@ function stageFromSource(config) {
 
   restoreLegacyHoists(repoRoot)
   materializeLinks(path.join(dshDir, 'node_modules'))
+  restoreMissingWorkspacePackages(repoRoot)
 
   const staged = JSON.parse(fs.readFileSync(path.join(dshDir, 'package.json'), 'utf8'))
   const binEntry = typeof staged.bin === 'string' ? staged.bin : staged.bin?.dsh
@@ -250,6 +251,77 @@ function materializeLinks(root) {
   }
   walk(root)
   if (replaced > 0) log(`materialized ${String(replaced)} staged links`)
+}
+
+/**
+ * The legacy deploy can omit transitive WORKSPACE packages (vendor and
+ * nested packages) that the deploy root only reaches indirectly through
+ * another workspace package. The published npm closure never hits this
+ * because npm hoists every transitive dep; source mode must copy the missing
+ * workspace packages from the built checkout so the staged closure is complete.
+ */
+function restoreMissingWorkspacePackages(repoRoot) {
+  const workspaceByName = new Map()
+  const scan = (dir, depth) => {
+    if (depth === 0) return
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      const candidate = path.join(dir, entry.name)
+      const manifestPath = path.join(candidate, 'package.json')
+      if (fs.existsSync(manifestPath)) {
+        try {
+          const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+          if (typeof manifest.name === 'string') workspaceByName.set(manifest.name, candidate)
+        } catch {
+          // A malformed manifest is not a package; skip it.
+        }
+      } else if (depth > 1) {
+        scan(candidate, depth - 1)
+      }
+    }
+  }
+  scan(path.join(repoRoot, 'vendor'), 1)
+  scan(path.join(repoRoot, 'packages'), 2)
+
+  const modules = path.join(dshDir, 'node_modules')
+  const staged = name => fs.existsSync(path.join(modules, name))
+  const queue = []
+  const seen = new Set()
+  const rootManifest = JSON.parse(fs.readFileSync(path.join(dshDir, 'package.json'), 'utf8'))
+  for (const dep of Object.keys(rootManifest.dependencies ?? {})) queue.push(dep)
+
+  let copied = 0
+  while (queue.length > 0) {
+    const name = queue.shift()
+    if (seen.has(name)) continue
+    seen.add(name)
+
+    let manifest
+    const stagedManifest = path.join(modules, name, 'package.json')
+    if (fs.existsSync(stagedManifest)) {
+      manifest = JSON.parse(fs.readFileSync(stagedManifest, 'utf8'))
+    } else {
+      const source = workspaceByName.get(name)
+      // Non-workspace missing packages are left to fail loudly on first load.
+      if (source === undefined) continue
+      const destination = path.join(modules, name)
+      const nested = path.join(source, 'node_modules')
+      fs.mkdirSync(path.dirname(destination), { recursive: true })
+      fs.cpSync(source, destination, {
+        recursive: true,
+        dereference: true,
+        filter: entry => entry !== nested && !entry.startsWith(nested + path.sep),
+      })
+      copied += 1
+      log(`restored missing workspace package ${name}`)
+      manifest = JSON.parse(fs.readFileSync(path.join(destination, 'package.json'), 'utf8'))
+    }
+
+    for (const key of ['dependencies', 'peerDependencies']) {
+      for (const dep of Object.keys(manifest[key] ?? {})) queue.push(dep)
+    }
+  }
+  if (copied > 0) log(`restored ${String(copied)} missing workspace package(s)`)
 }
 
 // -------------------------------------------------------------------- pruning
