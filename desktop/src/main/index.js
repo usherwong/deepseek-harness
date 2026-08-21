@@ -183,6 +183,7 @@ async function startHarness() {
     dshHome: settings.dshHome,
     port: settings.port ?? 0,
     userPath: resolveUserPath(),
+    appVersion: app.getVersion(),
     logger: harnessLogger,
   })
 

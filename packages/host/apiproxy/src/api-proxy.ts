@@ -2922,10 +2922,11 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
 
     host: {
       describe(request) {
-        // TODO: version should read apps/cli's package.json; placeholder for now.
+        // The desktop shell exports its app version as `DSH_DESKTOP_VERSION`;
+        // the bare CLI falls back to the harness (apps/cli) version.
         const selection = defaults.defaultModelSelection()
         return Promise.resolve(ok(request, {
-          version: '0.0.1',
+          version: process.env.DSH_DESKTOP_VERSION ?? '0.1.0-rc.5',
           // Same source as session.create's fallback: the UI's default project
           // must match where an unspecified-cwd session actually lands.
           cwd: defaults.cwd,

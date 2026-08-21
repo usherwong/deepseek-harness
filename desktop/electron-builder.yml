@@ -1,5 +1,5 @@
-appId: io.github.usherwong.dsh-desktop
-productName: DSH Desktop
+appId: io.github.usherwong.deepseek-desktop
+productName: DeepSeek Desktop
 copyright: MIT-licensed shell around DeepSeek Harness
 
 directories:

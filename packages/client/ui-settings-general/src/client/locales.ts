@@ -8,6 +8,9 @@ export const zh = {
   'openDocument': '打开配置文件',
   'openDocument.error': '无法打开配置文件',
   'general.nav': '通用设置',
+  'about.nav': '关于',
+  'about.product': 'DeepSeek Harness Desktop',
+  'about.versionPrefix': '版本 ',
 } satisfies Record<string, string>
 
 /** The settings namespace key union. */
@@ -21,4 +24,7 @@ export const en = {
   'openDocument': 'Open configuration file',
   'openDocument.error': 'Could not open configuration file',
   'general.nav': 'General',
+  'about.nav': 'About',
+  'about.product': 'DeepSeek Harness Desktop',
+  'about.versionPrefix': 'Version ',
 } satisfies Record<SettingsKey, string>
