@@ -460,6 +460,23 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
                 </div>
               )
               : null}
+            {isImageBridge
+              ? (
+                <div className={styles['field']}>
+                  <span className={styles['fieldLabel']}>{t('vlBackend')}</span>
+                  <select
+                    className={`${styles['input']} ${styles['selectInput']}`}
+                    value={stringAt(draft, 'vlBackend') ?? 'deepseek'}
+                    aria-label={t('vlBackend')}
+                    disabled={disabled}
+                    onChange={(event) => { setField('vlBackend', event.target.value) }}
+                  >
+                    <option value="deepseek">{t('vlBackendDeepseek')}</option>
+                    <option value="bailian">{t('vlBackendBailian')}</option>
+                  </select>
+                </div>
+              )
+              : null}
             <div className={styles['field']}>
               <span className={styles['fieldLabel']}>{t('baseUrl')}</span>
               <input

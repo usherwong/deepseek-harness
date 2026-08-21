@@ -12,7 +12,7 @@ import { getOrCreateAnonymousUserId } from '@deepseek-ai/dsh-anonymous-user-id'
 import type { AttachmentStore, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type { GenerateOptions, Message, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { ImageBridgeAdapter } from '../src/adapter.ts'
-import { readQwenConfig, resolveVlConfig } from '../src/vl.ts'
+import { resolveVlConfig } from '../src/vl.ts'
 
 function deepseekKey(): string {
   const text = readFileSync(join(homedir(), '.dsh', '.credentials.yaml'), 'utf8')
@@ -45,7 +45,7 @@ const inner = new DeepSeekAdapter({
 const adapter = new ImageBridgeAdapter({
   inner,
   resolveAttachments: () => attachments,
-  resolveVl: async () => resolveVlConfig({}, process.env.DASHSCOPE_API_KEY ?? readQwenConfig().DASHSCOPE_API_KEY ?? ''),
+  resolveVl: async () => resolveVlConfig({}, deepseekKey(), connection.baseURL),
 })
 
 const message = {

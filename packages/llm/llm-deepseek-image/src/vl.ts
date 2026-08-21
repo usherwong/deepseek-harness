@@ -1,11 +1,13 @@
 /**
  * Vision-language bridge: describe an image through an OpenAI-compatible
- * (Bailian/DashScope compatible-mode) chat-completions endpoint and return the
- * model's text description. The endpoint, model, and prompt resolve from
- * explicit plugin config, then the process environment, then
- * `~/.qwen-mm-plugins/config` — the same source the qwen-mm-plugins MCP server
- * reads — then defaults. The API key itself is resolved by the registering
- * plugin (credentials seam) and passed in.
+ * chat-completions endpoint and return the model's text description. Two
+ * backends are supported: `deepseek` (DeepSeek's own vision model, the
+ * default) and `bailian` (DashScope compatible-mode, the original default).
+ * For the Bailian backend, the endpoint and model resolve from explicit plugin
+ * config, then the process environment, then `~/.qwen-mm-plugins/config` — the
+ * same source the qwen-mm-plugins MCP server reads — then defaults. The API
+ * key itself is resolved by the registering plugin (credentials seam) and
+ * passed in.
  * @module dsh-llm-deepseek-image/vl
  */
 
@@ -14,15 +16,28 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { LlmError } from '@deepseek-ai/dsh-llm'
 
-/** Public OpenAI-compatible DashScope endpoint, used when nothing else names one. */
-const DEFAULT_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
-/** Default vision-language model, matching the qwen-mm-plugins VL default. */
-const DEFAULT_MODEL = 'qwen3.7-plus'
+/** The two vision-language backends the bridge can describe images through. */
+export type VlBackend = 'deepseek' | 'bailian'
+
+/** Default backend: DeepSeek's own vision model, so one DEEPSEEK_API_KEY covers chat + images. */
+export const DEFAULT_VL_BACKEND: VlBackend = 'deepseek'
+
+/** DeepSeek vision-language model (experimental), billed like V4-Flash. */
+export const DEFAULT_DEEPSEEK_VL_MODEL = 'deepseek-v4-flash-vision-exp'
+
+/** Public OpenAI-compatible DashScope endpoint, used for the Bailian backend when nothing else names one. */
+export const DEFAULT_BAILIAN_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+
+/** Default Bailian vision-language model, matching the qwen-mm-plugins VL default. */
+export const DEFAULT_BAILIAN_MODEL = 'qwen3.7-plus'
+
 /** Default description prompt: full scene + verbatim text transcription. */
-const DEFAULT_PROMPT = 'Describe this image in complete detail so that a person who cannot see it can fully understand it. Include: (1) the main subjects, objects, and scene; (2) ALL visible text transcribed verbatim; (3) colors, layout, and any other important visual details. Be thorough but concise.'
+export const DEFAULT_PROMPT = 'Describe this image in complete detail so that a person who cannot see it can fully understand it. Include: (1) the main subjects, objects, and scene; (2) ALL visible text transcribed verbatim; (3) colors, layout, and any other important visual details. Be thorough but concise.'
 
 /** Resolved vision-language facts for one request. */
 export interface VlConfig {
+  /** Which backend these facts describe. */
+  backend: VlBackend
   /** OpenAI-compatible base URL; `/chat/completions` is appended. */
   baseURL: string
   /** Bearer token for the endpoint. */
@@ -33,11 +48,18 @@ export interface VlConfig {
   prompt: string
 }
 
-/** Optional plugin config fields that name the VL endpoint and model (not the key). */
+/** Optional plugin config fields that name the VL backend, endpoint, and model (not the key). */
 export interface VlConfigInput {
+  /** Vision backend; defaults to DeepSeek's own vision model (`deepseek`). */
+  vlBackend?: VlBackend
   vlBaseURL?: string
   vlModel?: string
   vlPrompt?: string
+}
+
+/** The active backend for a config snapshot, defaulting to DeepSeek's own vision model. */
+export function vlBackendOf(input: VlConfigInput): VlBackend {
+  return input.vlBackend ?? DEFAULT_VL_BACKEND
 }
 
 /** Parse a minimal `KEY=VALUE` dotenv file; empty on any read/parse failure. */
@@ -89,17 +111,30 @@ export function writeQwenConfig(values: Record<string, string>): void {
 }
 
 /**
- * Resolve VL facts with precedence: explicit config → environment →
- * `~/.qwen-mm-plugins/config` → defaults. `apiKey` is the already-resolved
- * bearer token supplied by the caller.
+ * Resolve VL facts for the active backend. `apiKey` is the already-resolved
+ * bearer token for that backend (DeepSeek for `deepseek`, Bailian for
+ * `bailian`); `deepseekBaseURL` supplies the DeepSeek endpoint when the
+ * DeepSeek backend is active. Bailian facts keep the original precedence:
+ * explicit config → environment → `~/.qwen-mm-plugins/config` → defaults.
  */
-export function resolveVlConfig(input: VlConfigInput, apiKey: string): VlConfig {
-  const qwen = readQwenConfig()
+export function resolveVlConfig(input: VlConfigInput, apiKey: string, deepseekBaseURL: string): VlConfig {
+  const backend = vlBackendOf(input)
+  if (backend === 'deepseek') {
+    return {
+      backend,
+      baseURL: input.vlBaseURL ?? deepseekBaseURL,
+      apiKey,
+      model: input.vlModel ?? DEFAULT_DEEPSEEK_VL_MODEL,
+      prompt: input.vlPrompt ?? DEFAULT_PROMPT,
+    }
+  }
   const env = process.env
+  const qwen = readQwenConfig()
   return {
-    baseURL: input.vlBaseURL ?? env.DASHSCOPE_BASE_URL ?? qwen.DASHSCOPE_BASE_URL ?? DEFAULT_BASE_URL,
+    backend,
+    baseURL: input.vlBaseURL ?? env.DASHSCOPE_BASE_URL ?? qwen.DASHSCOPE_BASE_URL ?? DEFAULT_BAILIAN_BASE_URL,
     apiKey,
-    model: input.vlModel ?? env.QWEN_MM_API_VL_MODEL ?? qwen.QWEN_MM_API_VL_MODEL ?? DEFAULT_MODEL,
+    model: input.vlModel ?? env.QWEN_MM_API_VL_MODEL ?? qwen.QWEN_MM_API_VL_MODEL ?? DEFAULT_BAILIAN_MODEL,
     prompt: input.vlPrompt ?? DEFAULT_PROMPT,
   }
 }

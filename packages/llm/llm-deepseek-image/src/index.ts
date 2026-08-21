@@ -1,11 +1,13 @@
 /**
  * Register an image-capable DeepSeek route (`deepseek-image`) that wraps the
  * stock DeepSeek chat-completions adapter: pasted images are described by a
- * vision-language model (Bailian/DashScope compatible endpoint) and replaced
- * with text before the text-only DeepSeek model sees them. DeepSeek connection
- * facts resolve per request exactly like the stock `llm-deepseek` plugin, and
- * the Bailian key resolves through the credentials seam (the web Models page
- * writes it), then the environment, then `~/.qwen-mm-plugins/config`.
+ * vision-language model and replaced with text before the text-only DeepSeek
+ * model sees them. The vision backend defaults to DeepSeek's own
+ * `deepseek-v4-flash-vision-exp` (one DEEPSEEK_API_KEY covers chat + images)
+ * and can be switched back to the Bailian/DashScope endpoint. DeepSeek
+ * connection facts resolve per request exactly like the stock `llm-deepseek`
+ * plugin; the Bailian key resolves through the credentials seam (the web
+ * Models page writes it), then the environment, then `~/.qwen-mm-plugins/config`.
  * @module @deepseek-ai/dsh-llm-deepseek-image
  */
 
@@ -27,7 +29,7 @@ import {
 } from '@deepseek-ai/dsh-llm-deepseek'
 import type { DeepSeekCatalogModel, DeepSeekConnectionOptions } from '@deepseek-ai/dsh-llm-deepseek'
 import { ImageBridgeAdapter } from './adapter.ts'
-import { readQwenConfig, resolveVlConfig, writeQwenConfig, type VlConfig } from './vl.ts'
+import { readQwenConfig, resolveVlConfig, vlBackendOf, writeQwenConfig, type VlBackend, type VlConfig } from './vl.ts'
 
 export const name = 'llm-deepseek-image'
 export const inject = ['llm']
@@ -62,11 +64,13 @@ export interface Config {
   streamIdleTimeoutMs?: number
   /** Provider-owned model-request retry policy. */
   retryPolicy?: RetryPolicyConfig
-  /** Bailian key credential reference; defaults to `DASHSCOPE_API_KEY`. */
+  /** Vision backend; defaults to `deepseek` (DeepSeek's own vision model). */
+  vlBackend?: VlBackend
+  /** Bailian key credential reference; defaults to `DASHSCOPE_API_KEY` (used by the `bailian` backend). */
   vlApiKeyEnv?: string
-  /** Bailian/DashScope OpenAI-compatible base URL. */
+  /** OpenAI-compatible base URL override for the vision backend. */
   vlBaseURL?: string
-  /** Vision-language model id; defaults to `qwen3.7-plus`. */
+  /** Vision-language model id override; `deepseek` defaults to `deepseek-v4-flash-vision-exp`, `bailian` to `qwen3.7-plus`. */
   vlModel?: string
   /** Prompt paired with each image. */
   vlPrompt?: string
@@ -90,6 +94,7 @@ export const Config: z<Config> = z.object({
   models: z.array(catalogModel).default(DEFAULT_MODELS),
   streamIdleTimeoutMs: z.number().min(Number.MIN_VALUE).max(MAX_TIMER_DELAY_MS).default(DEFAULT_STREAM_IDLE_TIMEOUT_MS),
   retryPolicy: RetryPolicySchema,
+  vlBackend: z.union(['deepseek', 'bailian']),
   vlApiKeyEnv: z.string().role('credential-ref').default(DEFAULT_VL_API_KEY_ENV),
   vlBaseURL: z.string(),
   vlModel: z.string(),
@@ -157,8 +162,14 @@ export function apply(ctx: Context, config: Config): void {
   }
 
   const resolveVl = async (): Promise<VlConfig> => {
+    const raw = current()
+    if (vlBackendOf(raw) === 'deepseek') {
+      const connection = options()
+      const apiKey = await resolveApiKey(connection)
+      return resolveVlConfig(raw, apiKey, connection.baseURL)
+    }
     const apiKey = await resolveVlApiKey()
-    return resolveVlConfig(current(), apiKey)
+    return resolveVlConfig(raw, apiKey, '')
   }
 
   // Mirror the Bailian credential into ~/.qwen-mm-plugins/config so the
