@@ -149,6 +149,19 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
+/** Extract text from a chat-completions `content` (a string, or an array of text parts). */
+function textOfContent(content: unknown): string | undefined {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return undefined
+  let text = ''
+  for (const part of content) {
+    if (typeof part === 'object' && part !== null && 'text' in part && typeof (part as { text?: unknown }).text === 'string') {
+      text += (part as { text: string }).text
+    }
+  }
+  return text.length > 0 ? text : undefined
+}
+
 /**
  * Describe one image's encoded bytes through the VL endpoint, retrying
  * transient failures (network errors, HTTP 429, 5xx) up to three attempts so a
@@ -171,6 +184,11 @@ export async function describeImage(
         { type: 'text', text: vl.prompt },
       ],
     }],
+    // Disable thinking: the vision model is a reasoning model whose
+    // `reasoning_content` spends the `max_tokens` budget, so a verbose
+    // reasoning pass can exhaust it and leave `content` empty (finish_reason
+    // "length"). Describing an image needs the answer, not the reasoning.
+    thinking: { type: 'disabled' as const },
     max_tokens: 2048,
   }
   const maxAttempts = 3
@@ -199,9 +217,13 @@ export async function describeImage(
     }
 
     if (response.ok) {
-      const parsed = await response.json() as { choices?: Array<{ message?: { content?: unknown } }> }
-      const content = parsed.choices?.[0]?.message?.content
-      if (typeof content === 'string' && content.length > 0) return content
+      const parsed = await response.json() as { choices?: Array<{ message?: { content?: unknown; reasoning_content?: unknown } }> }
+      const message = parsed.choices?.[0]?.message
+      const description = textOfContent(message?.content)
+        ?? (typeof message?.reasoning_content === 'string' && message.reasoning_content.length > 0
+          ? message.reasoning_content
+          : undefined)
+      if (description !== undefined && description.length > 0) return description
       if (attempt < maxAttempts) {
         await sleep(backoffDelay(attempt))
         continue
