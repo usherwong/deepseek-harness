@@ -115,6 +115,11 @@ class FakeWorkspaceRemote implements WorkspaceRemote {
     return this.onArchiveSession(request)
   }
 
+  version(): Promise<RemoteResult<string>> {
+    this.record('version', undefined)
+    return Promise.resolve(remoteOk('0.0.0'))
+  }
+
   async *follow(_signal?: AbortSignal): AsyncGenerator<WorkspaceFollowFrame> {}
 
   private record(method: string, request: unknown): void {

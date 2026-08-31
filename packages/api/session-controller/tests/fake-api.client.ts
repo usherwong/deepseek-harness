@@ -268,6 +268,7 @@ export class FakeApiClient {
           payload,
           this.onWorkspaceArchiveSession(payload),
         ),
+        version: () => Promise.resolve(ok('0.0.0')),
         follow: signal => this.openWorkspace(signal),
       },
     }

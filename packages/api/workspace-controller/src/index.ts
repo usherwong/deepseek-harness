@@ -50,6 +50,15 @@ export class WorkspaceController extends TypertRemoteService {
   }
 
   /**
+   * The desktop app version, exported as `DSH_DESKTOP_VERSION` by the shell;
+   * the bare CLI falls back to the harness version.
+   */
+  @Remote('version')
+  version(): string {
+    return process.env.DSH_DESKTOP_VERSION ?? '0.1.2-alpha.2'
+  }
+
+  /**
    * Create or idempotently resolve one Workspace over an existing directory.
    * @param request - directory path to register.
    * @returns the Workspace and whether this call created it.
