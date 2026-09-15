@@ -18,6 +18,18 @@ const APPLE_TEAM_ID_ENV = 'APPLE_TEAM_ID'
 const APPLE_KEYCHAIN_ENV = 'APPLE_KEYCHAIN'
 const APPLE_KEYCHAIN_PROFILE_ENV = 'APPLE_KEYCHAIN_PROFILE'
 
+/** Environment variable that selects a local, unsigned build for testing on this machine. */
+export const LOCAL_BUILD_ENV = 'DSH_DESKTOP_LOCAL_BUILD'
+
+/**
+ * Whether this packaging run builds a local, unsigned application.
+ * @param {NodeJS.ProcessEnv} env - Packaging environment.
+ * @returns {boolean} True when the run must not require Apple signing or notary credentials.
+ */
+export function isLocalDesktopBuild(env) {
+  return env[LOCAL_BUILD_ENV] === '1'
+}
+
 /**
  * Read one required non-empty environment variable.
  * @param {NodeJS.ProcessEnv} env - Packaging environment.
@@ -51,6 +63,7 @@ export function resolveDesktopAppId(env) {
  * @returns {{ signingIdentity: string, teamId: string }} Expected certificate qualifier and Team ID.
  */
 export function resolveMacOSSigningEnvironment(env) {
+  if (isLocalDesktopBuild(env)) return { signingIdentity: 'local-adhoc', teamId: 'LOCALBUILD' }
   const signingIdentity = requireEnvironmentValue(env, MACOS_SIGNING_IDENTITY_ENV)
   if (signingIdentity.startsWith('Developer ID Application:')) {
     throw new Error(`desktop release environment: ${MACOS_SIGNING_IDENTITY_ENV} must omit the "Developer ID Application:" prefix`)
@@ -68,6 +81,7 @@ export function resolveMacOSSigningEnvironment(env) {
  * @returns {{ appleId: string, appleIdPassword: string, teamId: string } | { appleApiKey: string, appleApiKeyId: string, appleApiIssuer: string } | { keychainProfile: string, keychain?: string }} Notary credentials without the submitted artifact path.
  */
 export function resolveMacOSNotarizationEnvironment(env) {
+  if (isLocalDesktopBuild(env)) return { keychainProfile: 'local-unsigned' }
   const appleIdValues = [env[APPLE_ID_ENV], env[APPLE_APP_SPECIFIC_PASSWORD_ENV], env[APPLE_TEAM_ID_ENV]]
   if (appleIdValues.some(value => value !== undefined)) {
     return {
