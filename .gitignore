@@ -44,3 +44,6 @@ worktrees/
 .agents/worktrees/
 .typert-*/
 native/system/test/bin/
+
+# Local desktop shell build directory (the shell lives in usherwong/deepseek-desktop).
+desktop/
